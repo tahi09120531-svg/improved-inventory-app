@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>在庫管理</title>
+    
+    <!-- アプリ化のための設定 (PWA対応) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="在庫管理">
+    
+    <!-- Google Fonts (丸文字) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- LZ-String for compression -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
+    
+    <!-- カスタムカラー設定 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'cute-bg': '#fffcf5',
+                        'cute-pink': '#f4a6b2',
+                        'cute-pink-dark': '#e08896',
+                        'cute-text': '#5d5555',
+                        'mercari': '#ea352d',
+                        'rakuma': '#bf0000',
+                        'yahoo': '#ff0033',
+                        'minne': '#ea6c4d',
+                    },
+                    fontFamily: {
+                        sans: ['"M PLUS Rounded 1c"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* 横スクロールとバウンス防止 */
+        html, body {
+            overflow-x: hidden;
+            width: 100%;
+            position: relative;
+            touch-action: pan-y;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        body {
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            background-color: #fffcf5;
+            color: #5d5555;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* ふんわりした影 */
+        .soft-shadow {
+            box-shadow: 0 4px 15px -3px rgba(244, 166, 178, 0.2), 0 2px 6px -2px rgba(244, 166, 178, 0.1);
+        }
+
+        /* ボタンを押した時の動き */
+        .platform-btn {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            /* モバイルでのダブルタップズーム防止 */
+            touch-action: manipulation;
+        }
+        .platform-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .stock-badge {
+            font-feature-settings: "tnum";
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* モーダルアニメーション */
+        .modal {
+            transition: opacity 0.25s ease, visibility 0.25s ease;
+        }
+        .modal.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+        .modal.visible {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+        }
+        
+        body.modal-active {
+            overflow: hidden !important;
+        }
+
+        /* モーダル内のボタン固定用のスタイル */
+        .modal-footer-fixed {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 1rem;
+            background-color: white;
+            box-shadow: 0 -5px 15px rgba(0, 0, 0, 0.05);
+            border-top: 1px solid #f0f0f0;
+            z-index: 60;
+        }
+
+        /* タッチ操作の最適化 */
+        button, input, select, textarea {
+            touch-action: manipulation;
+        }
+
+        /* 同期状態インジケーター */
+        .sync-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+        
+        .sync-indicator.synced {
+            color: #10b981;
+        }
+        
+        .sync-indicator.not-synced {
+            color: #f59e0b;
+        }
+
+        /* 共有リンクモーダル */
+        .share-url {
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.75rem;
+            background: #f3f4f6;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body class="pb-24 safe-area-inset-bottom">
+
+    <!-- Header -->
+    <header class="bg-white/90 backdrop-blur-sm shadow-sm sticky top-0 z-40 w-full border-b border-pink-100">
+        <div class="max-w-3xl mx-auto px-4 py-3">
+            <!-- 上段：タイトルと操作ボタン -->
+            <div class="flex justify-between items-center mb-3">
+                <h1 class="text-xl font-bold text-cute-text truncate flex-1">
+                    <i class="fas fa-heart text-cute-pink mr-1"></i> My Stock
+                </h1>
+                
+                <div class="flex space-x-2 items-center flex-shrink-0 ml-2">
+                    <!-- 共有ボタン -->
+                    <button onclick="showShareModal()" class="text-cute-text hover:text-cute-pink w-10 h-10 rounded-full hover:bg-pink-50 flex items-center justify-center transition" title="共有リンクを生成">
+                        <i class="fas fa-share-alt text-lg"></i>
+                    </button>
+                    
+                    <!-- 追加ボタン -->
+                    <button id="add-product-btn" class="bg-cute-pink text-white w-10 h-10 rounded-full shadow-lg flex items-center justify-center hover:bg-cute-pink-dark transition transform hover:scale-105" title="商品を追加">
+                        <i class="fas fa-plus text-lg"></i>
+                    </button>
+                    
+                    <!-- ハンバーガーメニュー -->
+                    <div class="relative">
+                        <button onclick="toggleMenu()" class="text-cute-text hover:text-cute-pink w-10 h-10 rounded-full hover:bg-pink-50 flex items-center justify-center transition">
+                            <i class="fas fa-bars text-xl"></i>
+                        </button>
+                        
+                        <!-- ドロップダウンメニュー -->
+                        <div id="settings-menu" class="hidden absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-xl border border-pink-100 py-2 z-50 text-left transform origin-top-right overflow-hidden">
+                            <div class="px-4 py-2 text-xs font-bold text-gray-400 border-b border-gray-50 bg-gray-50">設定メニュー</div>
+                            
+                            <button onclick="downloadSource()" class="block w-full text-left px-4 py-3 text-sm text-blue-600 hover:bg-pink-50 font-bold border-b border-gray-50">
+                                <i class="fas fa-download mr-3 w-5 text-center"></i>アプリ本体を保存 (PC用)
+                            </button>
+                            
+                            <button onclick="exportData()" class="block w-full text-left px-4 py-3 text-sm text-cute-text hover:bg-pink-50 border-b border-gray-50">
+                                <i class="fas fa-file-export mr-3 w-5 text-center text-gray-400"></i>データ書き出し
+                            </button>
+                            
+                            <button onclick="importData()" class="block w-full text-left px-4 py-3 text-sm text-cute-text hover:bg-pink-50 border-b border-gray-50">
+                                <i class="fas fa-file-import mr-3 w-5 text-center text-gray-400"></i>データ読み込み
+                            </button>
+                            
+                            <button onclick="showShareModal()" class="block w-full text-left px-4 py-3 text-sm text-cute-text hover:bg-pink-50 border-b border-gray-50">
+                                <i class="fas fa-link mr-3 w-5 text-center text-gray-400"></i>共有リンクを生成
+                            </button>
+                            
+                            <button onclick="resetDemo()" class="block w-full text-left px-4 py-3 text-sm text-red-400 hover:bg-red-50">
+                                <i class="fas fa-trash-alt mr-3 w-5 text-center"></i>全データ削除
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 検索バー -->
+            <div class="relative w-full">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <i class="fas fa-search text-cute-pink/50"></i>
+                </div>
+                <input type="text" id="search-input" 
+                    class="block w-full pl-10 pr-3 py-2.5 border border-pink-100 rounded-2xl leading-5 bg-pink-50/50 placeholder-gray-400 focus:outline-none focus:bg-white focus:border-cute-pink focus:ring-2 focus:ring-cute-pink/20 sm:text-sm transition duration-150 ease-in-out appearance-none text-cute-text" 
+                    placeholder="さがす（名前、ふりがな...）" autocomplete="off">
+                <div id="search-count" class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-xs text-cute-pink font-bold hidden">
+                    0件
+                </div>
+                
+                <!-- サジェストリスト -->
+                <div id="search-suggestions" class="absolute top-full left-0 w-full bg-white border border-pink-100 rounded-b-2xl shadow-lg z-50 hidden max-h-60 overflow-y-auto mt-1">
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- オーバーレイ -->
+    <div id="menu-overlay" onclick="toggleMenu()" class="hidden fixed inset-0 bg-black/20 backdrop-blur-[1px] z-30 w-full h-full"></div>
+
+    <!-- Main Content -->
+    <main class="max-w-3xl mx-auto px-4 py-4 space-y-5 w-full" id="product-list">
+        <!-- Products will be injected here by JS -->
+    </main>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed top-24 left-1/2 transform -translate-x-1/2 bg-white text-cute-text px-6 py-3 rounded-full shadow-lg border border-pink-100 opacity-0 transition-opacity duration-300 pointer-events-none z-50 text-center whitespace-pre-line w-max max-w-[90vw] flex items-center gap-2">
+        <i class="fas fa-check-circle text-cute-pink"></i> <span id="toast-msg">処理完了</span>
+    </div>
+
+    <!-- 同期状態インジケーター -->
+    <div id="sync-indicator" class="sync-indicator hidden">
+        <button onclick="showShareModal()" class="bg-white rounded-full p-3 shadow-lg border border-gray-100" title="同期状態">
+            <i class="fas fa-link text-lg"></i>
+        </button>
+    </div>
+
+    <!-- Edit/Add Modal -->
+    <div id="product-modal" class="modal hidden fixed w-full h-full top-0 left-0 flex items-center justify-center z-50 p-4">
+        <div class="modal-overlay absolute w-full h-full bg-cute-text/30 backdrop-blur-sm" onclick="closeModal()"></div>
+        
+        <div class="modal-container bg-white w-full max-w-md mx-auto rounded-3xl shadow-2xl z-50 overflow-y-auto max-h-[90vh]">
+            <div class="modal-content px-6 pt-6 pb-28">
+                
+                <!-- Title -->
+                <div class="flex justify-between items-center pb-4 border-b border-gray-100 mb-6 sticky top-0 bg-white z-10">
+                    <p class="text-xl font-bold text-cute-text" id="modal-title">商品を登録</p>
+                    <div class="modal-close cursor-pointer z-50 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition" onclick="closeModal()">
+                        <i class="fas fa-times text-gray-500 text-sm"></i>
+                    </div>
+                </div>
+
+                <!-- Body Scrollable Content -->
+                <div class="space-y-5">
+                    <input type="hidden" id="edit-id">
+                    
+                    <div>
+                        <label class="block text-cute-text text-sm font-bold mb-2 pl-1" for="edit-name">商品名 <span class="text-red-400">*</span></label>
+                        <input class="appearance-none border border-gray-200 rounded-xl w-full py-3 px-4 text-cute-text leading-tight focus:outline-none focus:border-cute-pink focus:ring-2 focus:ring-cute-pink/20 bg-gray-50 focus:bg-white transition" id="edit-name" type="text" placeholder="例: ハンドメイドポーチ">
+                    </div>
+
+                    <div>
+                        <label class="block text-cute-text text-sm font-bold mb-2 pl-1" for="edit-yomi">ふりがな <span class="text-xs font-normal text-gray-400">(検索用)</span></label>
+                        <input class="appearance-none border border-gray-200 rounded-xl w-full py-3 px-4 text-cute-text leading-tight focus:outline-none focus:border-cute-pink focus:ring-2 focus:ring-cute-pink/20 bg-gray-50 focus:bg-white transition" id="edit-yomi" type="text" placeholder="例: はんどめいどぽーち">
+                    </div>
+
+                    <div>
+                        <label class="block text-cute-text text-sm font-bold mb-2 pl-1" for="edit-price">価格 (円)</label>
+                        <input class="appearance-none border border-gray-200 rounded-xl w-full py-3 px-4 text-cute-text leading-tight focus:outline-none focus:border-cute-pink focus:ring-2 focus:ring-cute-pink/20 bg-gray-50 focus:bg-white transition" id="edit-price" type="number" placeholder="3000">
+                    </div>
+
+                    <div>
+                        <label class="block text-cute-text text-sm font-bold mb-2 pl-1">画像</label>
+                        <div class="border-2 border-dashed border-pink-200 rounded-xl p-4 text-center bg-pink-50/30 hover:bg-pink-50/50 transition cursor-pointer" onclick="document.getElementById('edit-image-file').click()">
+                            <input type="file" id="edit-image-file" accept="image/*" class="hidden" onchange="handleFileSelect(this)">
+                            <i class="fas fa-camera text-cute-pink text-2xl mb-2"></i>
+                            <p class="text-cute-pink text-sm font-bold">写真を選択</p>
+                        </div>
+                        <p class="text-center text-gray-400 text-xs my-2">または URLを入力</p>
+                        <input class="appearance-none border border-gray-200 rounded-xl w-full py-3 px-4 text-cute-text leading-tight focus:outline-none focus:border-cute-pink focus:ring-2 focus:ring-cute-pink/20 bg-gray-50 focus:bg-white transition text-sm" id="edit-image-url" type="text" placeholder="https://..." oninput="updatePreviewFromUrl()">
+                        
+                        <div class="mt-3 relative">
+                            <p class="text-xs text-gray-400 mb-1">プレビュー</p>
+                            <div class="bg-gray-100 rounded-xl h-32 flex items-center justify-center overflow-hidden">
+                                <img id="image-preview" src="" alt="プレビュー" class="max-h-full max-w-full object-contain hidden">
+                                <span id="no-image-text" class="text-gray-300 text-sm">NO IMAGE</span>
+                            </div>
+                            <button type="button" id="clear-image-btn" onclick="clearImage()" class="hidden absolute top-5 right-1 bg-red-400 text-white rounded-full w-6 h-6 text-xs hover:bg-red-500 transition">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Fixed Footer -->
+            <div class="modal-footer-fixed flex gap-3">
+                <button type="button" onclick="closeModal()" class="flex-1 bg-gray-100 text-cute-text font-bold py-3 px-4 rounded-xl hover:bg-gray-200 transition">
+                    キャンセル
+                </button>
+                <button type="button" id="save-product-btn" class="flex-1 bg-cute-pink text-white font-bold py-3 px-4 rounded-xl hover:bg-cute-pink-dark transition">
+                    保存する
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div id="share-modal" class="modal hidden fixed w-full h-full top-0 left-0 flex items-center justify-center z-50 p-4">
+        <div class="modal-overlay absolute w-full h-full bg-cute-text/30 backdrop-blur-sm" onclick="closeShareModal()"></div>
+        
+        <div class="modal-container bg-white w-full max-w-md mx-auto rounded-3xl shadow-2xl z-50 overflow-hidden">
+            <div class="px-6 pt-6 pb-6">
+                <div class="flex justify-between items-center pb-4 border-b border-gray-100 mb-4">
+                    <p class="text-xl font-bold text-cute-text"><i class="fas fa-share-alt text-cute-pink mr-2"></i>共有リンク</p>
+                    <div class="cursor-pointer p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition" onclick="closeShareModal()">
+                        <i class="fas fa-times text-gray-500 text-sm"></i>
+                    </div>
+                </div>
+                
+                <p class="text-sm text-gray-500 mb-3">このリンクを共有すると、現在の在庫データを他のデバイスで開くことができます。</p>
+                
+                <div class="share-url mb-4" id="share-url-display">
+                    リンクを生成中...
+                </div>
+                
+                <div class="flex gap-3">
+                    <button onclick="copyShareLink()" class="flex-1 bg-cute-pink text-white font-bold py-3 px-4 rounded-xl hover:bg-cute-pink-dark transition">
+                        <i class="fas fa-copy mr-2"></i>コピー
+                    </button>
+                    <button onclick="closeShareModal()" class="flex-1 bg-gray-100 text-cute-text font-bold py-3 px-4 rounded-xl hover:bg-gray-200 transition">
+                        閉じる
+                    </button>
+                </div>
+                
+                <p class="text-xs text-gray-400 mt-4 text-center">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    リンクにはすべてのデータが含まれます。<br>
+                    データ量が多い場合、URLが長くなることがあります。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- No Results Template -->
+    <template id="no-results-template">
+        <div class="text-center py-16 text-gray-400">
+            <i class="fas fa-search text-4xl mb-4 opacity-50"></i>
+            <p class="font-bold">商品が見つかりません</p>
+            <p class="text-sm mt-1">検索条件を変更してください</p>
+        </div>
+    </template>
+
+    <!-- Hidden file input for import -->
+    <input type="file" id="import-file" accept=".json" class="hidden" onchange="processImport(this)">
+
+    <script>
+        // ============================================
+        // 改善版: State管理 + URL-as-State同期パターン
+        // ============================================
+
+        const STORAGE_KEY = 'inventoryData';
+        const URL_PARAM_KEY = 'data';
+        
+        // 初期データ
+        const initialProducts = [
+            {
+                id: Date.now(),
+                name: "使い方：ここをタップして編集",
+                yomi: "つかいかた",
+                price: 0,
+                stocks: { mercari: 1, rakuma: 0, minne: 0, yahoo: 0 }
+            }
+        ];
+
+        let products = [];
+        let searchTerm = '';
+        let currentImageBase64 = null;
+        let isModalOpen = false;
+        let isSaving = false;
+        let isFromUrl = false;
+
+        // ============================================
+        // デバウンス関数（モバイル対策）
+        // ============================================
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // ============================================
+        // URL-as-State: データのエンコード/デコード
+        // ============================================
+        function encodeDataToUrl(data) {
+            try {
+                const jsonStr = JSON.stringify(data);
+                // LZ-Stringで圧縮してBase64エンコード
+                const compressed = LZString.compressToEncodedURIComponent(jsonStr);
+                return compressed;
+            } catch (e) {
+                console.error('データのエンコードに失敗:', e);
+                return null;
+            }
+        }
+
+        function decodeDataFromUrl(encoded) {
+            try {
+                // LZ-Stringで解凍
+                const jsonStr = LZString.decompressFromEncodedURIComponent(encoded);
+                if (!jsonStr) return null;
+                return JSON.parse(jsonStr);
+            } catch (e) {
+                console.error('データのデコードに失敗:', e);
+                return null;
+            }
+        }
+
+        function generateShareUrl() {
+            const encoded = encodeDataToUrl(products);
+            if (!encoded) return null;
+            
+            const baseUrl = window.location.origin + window.location.pathname;
+            return `${baseUrl}?${URL_PARAM_KEY}=${encoded}`;
+        }
+
+        function loadDataFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const encodedData = urlParams.get(URL_PARAM_KEY);
+            
+            if (encodedData) {
+                const decodedData = decodeDataFromUrl(encodedData);
+                if (decodedData && Array.isArray(decodedData)) {
+                    products = decodedData;
+                    isFromUrl = true;
+                    // URLからデータを読み込んだらlocalStorageにも保存
+                    saveData();
+                    // URLパラメータをクリア（履歴を汚さないため）
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    showToast('共有データを読み込みました');
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // ============================================
+        // データ永続化
+        // ============================================
+        function loadData() {
+            // まずURLからデータを読み込む
+            if (loadDataFromUrl()) {
+                updateSyncIndicator(true);
+                return;
+            }
+            
+            // URLにデータがなければlocalStorageから読み込む
+            const savedData = localStorage.getItem(STORAGE_KEY);
+            if (savedData) {
+                try {
+                    products = JSON.parse(savedData);
+                } catch (e) {
+                    console.error("データ読み込みエラー", e);
+                    products = JSON.parse(JSON.stringify(initialProducts));
+                }
+            } else {
+                products = JSON.parse(JSON.stringify(initialProducts));
+            }
+            updateSyncIndicator(false);
+        }
+
+        function saveData() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
+            updateSyncIndicator(false);
+        }
+
+        function updateSyncIndicator(synced) {
+            const indicator = document.getElementById('sync-indicator');
+            if (synced) {
+                indicator.classList.remove('hidden');
+                indicator.classList.add('synced');
+                indicator.classList.remove('not-synced');
+            } else {
+                indicator.classList.add('hidden');
+            }
+        }
+
+        // ============================================
+        // 検索・サジェスト機能
+        // ============================================
+        const searchInput = document.getElementById('search-input');
+        const suggestionsBox = document.getElementById('search-suggestions');
+
+        searchInput.addEventListener('input', debounce((e) => {
+            searchTerm = e.target.value.toLowerCase().trim();
+            renderProducts();
+            if (searchTerm.length > 0) {
+                showSuggestions(searchTerm);
+            } else {
+                suggestionsBox.classList.add('hidden');
+            }
+        }, 150));
+
+        searchInput.addEventListener('blur', () => {
+            setTimeout(() => {
+                suggestionsBox.classList.add('hidden');
+            }, 200);
+        });
+
+        function showSuggestions(term) {
+            const matches = products.filter(p => {
+                const nameMatch = p.name.toLowerCase().includes(term);
+                const yomiMatch = p.yomi && p.yomi.toLowerCase().includes(term);
+                return nameMatch || yomiMatch;
+            });
+            
+            if (matches.length > 0) {
+                suggestionsBox.innerHTML = '';
+                matches.slice(0, 5).forEach(product => {
+                    const div = document.createElement('div');
+                    div.className = 'px-4 py-3 hover:bg-pink-50 cursor-pointer border-b last:border-b-0 border-pink-50 text-sm text-cute-text transition duration-150 flex items-center gap-2';
+                    let displayName = product.name;
+                    if (product.name.toLowerCase().includes(term)) {
+                        const regex = new RegExp(`(${term})`, 'gi');
+                        displayName = product.name.replace(regex, '<span class="font-bold text-cute-pink">$1</span>');
+                    }
+                    div.innerHTML = `<i class="fas fa-search text-pink-200 text-xs"></i><span>${displayName}</span>`;
+                    div.addEventListener('click', () => {
+                        searchInput.value = product.name;
+                        searchTerm = product.name.toLowerCase();
+                        renderProducts();
+                        suggestionsBox.classList.add('hidden');
+                    });
+                    suggestionsBox.appendChild(div);
+                });
+                suggestionsBox.classList.remove('hidden');
+            } else {
+                suggestionsBox.classList.add('hidden');
+            }
+        }
+
+        // ============================================
+        // メイン描画処理
+        // ============================================
+        function renderProducts() {
+            const container = document.getElementById('product-list');
+            container.innerHTML = '';
+
+            const filteredProducts = products.filter(product => {
+                const nameMatch = product.name.toLowerCase().includes(searchTerm);
+                const idMatch = String(product.id).includes(searchTerm);
+                const yomiMatch = product.yomi && product.yomi.toLowerCase().includes(searchTerm);
+                return nameMatch || idMatch || yomiMatch;
+            });
+
+            const countEl = document.getElementById('search-count');
+            if (searchTerm) {
+                countEl.textContent = `${filteredProducts.length}件`;
+                countEl.classList.remove('hidden');
+            } else {
+                countEl.classList.add('hidden');
+            }
+
+            if (filteredProducts.length === 0) {
+                const template = document.getElementById('no-results-template');
+                container.appendChild(template.content.cloneNode(true));
+                return;
+            }
+
+            filteredProducts.forEach(product => {
+                const totalStock = Object.values(product.stocks).reduce((sum, val) => sum + val, 0);
+                const isOutOfStock = totalStock <= 0;
+                
+                const card = document.createElement('div');
+                card.className = `bg-white rounded-3xl soft-shadow overflow-hidden relative w-full border border-white transition hover:shadow-md`;
+                
+                let platformButtons = '';
+                const platformConfig = {
+                    mercari: { name: 'メルカリ', class: 'bg-mercari text-white' },
+                    rakuma: { name: 'ラクマ', class: 'bg-rakuma text-white' },
+                    yahoo: { name: 'Yahoo!', class: 'bg-yahoo text-white' },
+                    minne: { name: 'minne', class: 'bg-minne text-white' }
+                };
+
+                platformButtons = '<div class="grid grid-cols-4 gap-2 pt-3 border-t border-dashed border-gray-100 w-full">';
+
+                ['mercari', 'rakuma', 'yahoo', 'minne'].forEach(p => {
+                    const conf = platformConfig[p];
+                    const stock = product.stocks[p] || 0;
+                    const hasStock = stock > 0;
+                    
+                    const btnClass = hasStock ? conf.class : 'bg-gray-100 text-gray-400';
+                    
+                    platformButtons += `
+                        <div class="flex flex-col items-center w-full min-w-0">
+                            <div class="flex items-center justify-center mb-1.5 space-x-1">
+                                <span class="text-cute-text text-xs font-bold stock-badge">${stock}</span>
+                                <button onclick="addStock(${product.id}, '${p}', '${conf.name}')" class="text-cute-pink hover:text-white hover:bg-cute-pink border border-pink-100 bg-white rounded-full w-5 h-5 flex items-center justify-center shadow-sm active:scale-90 transition platform-btn"><i class="fas fa-plus text-[8px]"></i></button>
+                            </div>
+                            <button onclick="sellItem(${product.id}, '${p}', '${conf.name}')" class="${btnClass} w-full py-2.5 rounded-xl shadow-sm hover:opacity-90 active:scale-95 transition flex flex-col items-center justify-center h-full min-h-[3.2rem] platform-btn" ${!hasStock ? 'disabled' : ''}>
+                                <span class="text-[9px] mb-0.5 opacity-90 leading-none font-normal">${hasStock ? '売れた!' : '在庫なし'}</span>
+                                <span class="font-bold text-[10px] sm:text-xs truncate w-full text-center px-1">${conf.name}</span>
+                            </button>
+                        </div>
+                    `;
+                });
+                platformButtons += '</div>';
+
+                card.innerHTML = `
+                    <div class="md:flex">
+                        <div class="md:w-1/3 h-52 md:h-auto relative group bg-gray-50 flex items-center justify-center">
+                            ${product.image ? 
+                                `<img class="w-full h-full object-contain p-2 transition duration-300" src="${product.image}" alt="${product.name}" onerror="this.src='https://via.placeholder.com/400x300?text=No+Image'">` :
+                                `<div class="w-full h-full flex flex-col items-center justify-center text-gray-300"><i class="fas fa-image text-3xl mb-1"></i><span class="text-xs">NO IMAGE</span></div>`
+                            }
+                            <div class="absolute top-0 right-0 m-3 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-bold text-cute-text shadow-sm border border-white">
+                                ¥${product.price.toLocaleString()}
+                            </div>
+                            
+                            <button onclick="openModal(${product.id})" class="absolute top-0 left-0 m-3 bg-white/90 text-gray-500 hover:text-cute-pink w-9 h-9 rounded-full shadow-sm border border-white flex items-center justify-center transition z-20 platform-btn">
+                                <i class="fas fa-pen text-sm"></i>
+                            </button>
+                            <button onclick="deleteProduct(${product.id})" class="absolute bottom-0 left-0 m-3 bg-white/90 text-red-300 hover:text-red-500 w-9 h-9 rounded-full shadow-sm border border-white flex items-center justify-center transition z-20 platform-btn" title="商品を削除">
+                                <i class="fas fa-trash-alt text-sm"></i>
+                            </button>
+                            
+                            ${isOutOfStock ? '<div class="absolute inset-0 bg-gray-900/60 backdrop-blur-[2px] flex items-center justify-center text-white font-bold text-2xl z-30 rounded-t-3xl md:rounded-l-3xl md:rounded-tr-none tracking-widest">SOLD OUT</div>' : ''}
+                        </div>
+                        <div class="p-5 md:w-2/3 flex flex-col justify-between">
+                            <div>
+                                <h2 class="text-lg font-bold text-cute-text leading-tight mb-1">${product.name}</h2>
+                                <p class="text-gray-400 text-xs mb-4 font-mono">ID: ${product.id}</p>
+                            </div>
+                            <div class="w-full">
+                                ${platformButtons}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        // ============================================
+        // モーダル・商品操作（改善版）
+        // ============================================
+        function openModal(id = null) {
+            if (isModalOpen) return; // 二重オープン防止
+            
+            isModalOpen = true;
+            
+            const modal = document.getElementById('product-modal');
+            const title = document.getElementById('modal-title');
+            const editId = document.getElementById('edit-id');
+            const nameInput = document.getElementById('edit-name');
+            const yomiInput = document.getElementById('edit-yomi');
+            const priceInput = document.getElementById('edit-price');
+            const urlInput = document.getElementById('edit-image-url');
+            
+            // フォームを完全にリセット
+            resetModalForm();
+            
+            modal.classList.remove('hidden');
+            modal.classList.add('visible');
+            document.body.classList.add('modal-active');
+            
+            if (id) {
+                const product = products.find(p => p.id === id);
+                if (product) {
+                    title.innerText = "商品を編集";
+                    editId.value = product.id;
+                    nameInput.value = product.name;
+                    yomiInput.value = product.yomi || '';
+                    priceInput.value = product.price;
+                    if (product.image && product.image.startsWith('data:')) {
+                        currentImageBase64 = product.image;
+                        urlInput.value = '';
+                    } else {
+                        urlInput.value = product.image || '';
+                    }
+                }
+            } else {
+                title.innerText = "商品を登録";
+            }
+            refreshPreview();
+            
+            // フォーカスを商品名に
+            setTimeout(() => nameInput.focus(), 100);
+        }
+
+        function resetModalForm() {
+            currentImageBase64 = null;
+            document.getElementById('edit-id').value = '';
+            document.getElementById('edit-name').value = '';
+            document.getElementById('edit-yomi').value = '';
+            document.getElementById('edit-price').value = '';
+            document.getElementById('edit-image-url').value = '';
+            document.getElementById('edit-image-file').value = '';
+        }
+
+        function closeModal() {
+            if (!isModalOpen) return;
+            
+            const modal = document.getElementById('product-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('visible');
+            document.body.classList.remove('modal-active');
+            
+            // 状態をリセット
+            resetModalForm();
+            refreshPreview();
+            
+            // 少し遅延してフラグをリセット（アニメーション完了後）
+            setTimeout(() => {
+                isModalOpen = false;
+            }, 300);
+        }
+
+        function handleFileSelect(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    currentImageBase64 = e.target.result;
+                    document.getElementById('edit-image-url').value = '';
+                    refreshPreview();
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        function updatePreviewFromUrl() {
+            currentImageBase64 = null;
+            document.getElementById('edit-image-file').value = '';
+            refreshPreview();
+        }
+
+        function refreshPreview() {
+            const preview = document.getElementById('image-preview');
+            const noImage = document.getElementById('no-image-text');
+            const clearBtn = document.getElementById('clear-image-btn');
+            const urlInput = document.getElementById('edit-image-url');
+            let imageUrl = currentImageBase64 || urlInput.value;
+            if (imageUrl) {
+                preview.src = imageUrl;
+                preview.classList.remove('hidden');
+                clearBtn.classList.remove('hidden');
+                noImage.classList.add('hidden');
+                preview.onerror = function() {
+                    preview.classList.add('hidden');
+                    clearBtn.classList.add('hidden');
+                    noImage.classList.remove('hidden');
+                }
+            } else {
+                preview.classList.add('hidden');
+                clearBtn.classList.add('hidden');
+                noImage.classList.remove('hidden');
+            }
+        }
+
+        function clearImage() {
+            currentImageBase64 = null;
+            document.getElementById('edit-image-url').value = '';
+            document.getElementById('edit-image-file').value = '';
+            refreshPreview();
+        }
+
+        // 保存処理（デバウンス付き）
+        const saveProduct = debounce(function() {
+            if (isSaving) return;
+            isSaving = true;
+            
+            const id = document.getElementById('edit-id').value;
+            const name = document.getElementById('edit-name').value.trim();
+            const yomi = document.getElementById('edit-yomi').value.trim();
+            const price = parseInt(document.getElementById('edit-price').value) || 0;
+            const urlValue = document.getElementById('edit-image-url').value.trim();
+            const finalImage = currentImageBase64 || urlValue;
+
+            if (!name) {
+                alert("商品名は必須です");
+                isSaving = false;
+                return;
+            }
+
+            if (id) {
+                const productIndex = products.findIndex(p => p.id == id);
+                if (productIndex > -1) {
+                    products[productIndex].name = name;
+                    products[productIndex].yomi = yomi;
+                    products[productIndex].price = price;
+                    products[productIndex].image = finalImage;
+                    showToast('商品を更新しました');
+                }
+            } else {
+                // 一意なID生成（タイムスタンプ + ランダム + カウンター）
+                const newId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+                
+                products.unshift({
+                    id: newId,
+                    name: name,
+                    yomi: yomi,
+                    price: price,
+                    image: finalImage,
+                    stocks: { mercari: 0, rakuma: 0, minne: 0, yahoo: 0 }
+                });
+                showToast('新商品を登録しました');
+            }
+            
+            saveData();
+            closeModal();
+            renderProducts();
+            
+            setTimeout(() => {
+                isSaving = false;
+            }, 500);
+        }, 300);
+
+        function deleteProduct(id) {
+            const confirmed = window.confirm("この商品を削除しますか？\n（この操作は元に戻せません）");
+            if (confirmed) {
+                products = products.filter(p => p.id !== id);
+                saveData();
+                renderProducts();
+                showToast("商品を削除しました");
+            }
+        }
+
+        function sellItem(id, platformKey, platformName) {
+            const product = products.find(p => p.id === id);
+            if (product && product.stocks[platformKey] > 0) {
+                product.stocks[platformKey]--;
+                saveData();
+                renderProducts();
+                showToast(`${platformName}で販売しました`);
+            }
+        }
+
+        function addStock(id, platformKey, platformName) {
+            const product = products.find(p => p.id === id);
+            if (product) {
+                product.stocks[platformKey]++;
+                saveData();
+                renderProducts();
+                showToast(`${platformName}に入庫しました`, 'blue');
+            }
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = message;
+            toast.style.opacity = '1';
+            setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+        }
+
+        // ============================================
+        // 共有モーダル
+        // ============================================
+        function showShareModal() {
+            const modal = document.getElementById('share-modal');
+            const urlDisplay = document.getElementById('share-url-display');
+            
+            modal.classList.remove('hidden');
+            modal.classList.add('visible');
+            
+            const shareUrl = generateShareUrl();
+            if (shareUrl) {
+                urlDisplay.textContent = shareUrl;
+            } else {
+                urlDisplay.textContent = 'リンクの生成に失敗しました';
+            }
+        }
+
+        function closeShareModal() {
+            const modal = document.getElementById('share-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('visible');
+        }
+
+        function copyShareLink() {
+            const shareUrl = generateShareUrl();
+            if (shareUrl) {
+                navigator.clipboard.writeText(shareUrl).then(() => {
+                    showToast('リンクをコピーしました');
+                }).catch(() => {
+                    // フォールバック
+                    const textArea = document.createElement('textarea');
+                    textArea.value = shareUrl;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    showToast('リンクをコピーしました');
+                });
+            }
+        }
+
+        // ============================================
+        // データエクスポート・インポート・リセット
+        // ============================================
+        function toggleMenu() {
+            const menu = document.getElementById('settings-menu');
+            const overlay = document.getElementById('menu-overlay');
+            
+            menu.classList.toggle('hidden');
+            overlay.classList.toggle('hidden');
+        }
+
+        function downloadSource() {
+            const htmlContent = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+            const blob = new Blob([htmlContent], { type: "text/html" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "index.html";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast("HTMLファイルを保存しました");
+        }
+
+        function exportData() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(products, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            const date = new Date().toISOString().slice(0,10);
+            downloadAnchorNode.setAttribute("download", `inventory_backup_${date}.json`);
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+            showToast("データを書き出しました");
+        }
+
+        function importData() {
+            document.getElementById('import-file').click();
+        }
+
+        function processImport(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const importedData = JSON.parse(e.target.result);
+                        if (Array.isArray(importedData)) {
+                            if(confirm("現在のデータは上書きされます。よろしいですか？")) {
+                                products = importedData;
+                                saveData();
+                                renderProducts();
+                                showToast("データを読み込みました");
+                            }
+                        } else {
+                            alert("無効なデータ形式です");
+                        }
+                    } catch (error) {
+                        alert("読み込みエラー: " + error.message);
+                    }
+                };
+                reader.readAsText(input.files[0]);
+            }
+            input.value = '';
+        }
+
+        function resetDemo() {
+            if(confirm("【警告】すべてのデータを削除し、初期状態に戻します。よろしいですか？")) {
+                localStorage.removeItem(STORAGE_KEY);
+                loadData();
+                document.getElementById('search-input').value = '';
+                searchTerm = '';
+                renderProducts();
+                showToast('データを初期化しました');
+            }
+        }
+
+        // ============================================
+        // イベントリスナーの設定（改善版）
+        // ============================================
+        document.getElementById('add-product-btn').addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            openModal();
+        });
+
+        document.getElementById('save-product-btn').addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            saveProduct();
+        });
+
+        // キーボードショートカット
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && isModalOpen) {
+                closeModal();
+            }
+        });
+
+        // ============================================
+        // 初期化実行
+        // ============================================
+        loadData();
+        renderProducts();
+
+        // デバッグ用ログ
+        console.log('🚀 改善版在庫管理アプリ 起動完了');
+        console.log('📦 商品数:', products.length);
+        console.log('🔗 URL-as-State機能: 有効');
+    </script>
+</body>
+</html>
