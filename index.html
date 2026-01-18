@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>在庫管理</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(135deg, #ffeef8 0%, #ffe8f5 100%); min-height: 100vh; padding: 20px; }
+        .header { text-align: center; margin-bottom: 30px; position: relative; }
+        .header h1 { font-size: 2em; color: #ff69b4; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .header h1::before { content: '🧸'; font-size: 1.2em; }
+        .sync-status { position: absolute; top: 0; right: 0; padding: 8px 16px; border-radius: 20px; font-size: 0.9em; font-weight: bold; }
+        .sync-status.synced { background: #4CAF50; color: white; }
+        .sync-status.syncing { background: #FF9800; color: white; }
+        .sync-status.error { background: #F44336; color: white; }
+        .search-bar { margin-bottom: 20px; position: relative; }
+        .search-bar input { width: 100%; padding: 15px 50px 15px 20px; border: 3px dashed #ffb6d9; border-radius: 25px; font-size: 1em; background: white; }
+        .search-bar button { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; font-size: 1.5em; cursor: pointer; }
+        .add-btn { position: fixed; bottom: 30px; right: 30px; width: 70px; height: 70px; border-radius: 50%; background: linear-gradient(135deg, #ff69b4, #ff1493); color: white; border: none; font-size: 2.5em; cursor: pointer; box-shadow: 0 8px 20px rgba(255,105,180,0.4); z-index: 100; transition: transform 0.2s; }
+        .add-btn:hover { transform: scale(1.1); }
+        .menu-btn { position: fixed; bottom: 30px; right: 120px; width: 60px; height: 60px; border-radius: 50%; background: white; border: 3px solid #ff69b4; font-size: 2em; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.1); z-index: 100; }
+        .products-grid { display: grid; gap: 20px; }
+        .product-card { background: white; border-radius: 20px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; gap: 20px; }
+        .product-image-container { position: relative; width: 200px; height: 200px; flex-shrink: 0; }
+        .product-image { width: 100%; height: 100%; object-fit: cover; border-radius: 15px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999; font-size: 0.9em; }
+        .sold-out-badge { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(128,128,128,0.8); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.5em; font-weight: bold; border-radius: 15px; letter-spacing: 0.2em; }
+        .product-price { position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.95); padding: 8px 15px; border-radius: 20px; font-weight: bold; color: #ff1493; font-size: 1.1em; }
+        .product-actions { position: absolute; top: 10px; left: 10px; display: flex; gap: 8px; }
+        .product-actions button { width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,0.95); cursor: pointer; font-size: 1.2em; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .product-info { flex: 1; }
+        .product-name { font-size: 1.5em; font-weight: bold; color: #333; margin-bottom: 5px; }
+        .product-id { font-size: 0.9em; color: #999; margin-bottom: 15px; }
+        .platforms { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+        .platform { display: flex; flex-direction: column; gap: 8px; }
+        .platform-btn { padding: 15px; border-radius: 15px; border: 3px solid; background: white; cursor: pointer; text-align: center; font-weight: bold; transition: all 0.2s; position: relative; }
+        .platform-btn.has-stock { color: white; }
+        .platform-btn.no-stock { color: #999; cursor: not-allowed; }
+        .platform-number { font-size: 2em; font-weight: bold; }
+        .platform-add button { width: 100%; padding: 10px; border-radius: 10px; border: none; background: #4CAF50; color: white; cursor: pointer; font-weight: bold; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 20px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-header h2 { color: #ff69b4; }
+        .close-btn { background: none; border: none; font-size: 2em; cursor: pointer; color: #999; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: bold; color: #333; }
+        .form-group input { width: 100%; padding: 12px; border: 2px solid #ffb6d9; border-radius: 10px; font-size: 1em; }
+        .btn-primary { width: 100%; padding: 15px; background: linear-gradient(135deg, #ff69b4, #ff1493); color: white; border: none; border-radius: 10px; font-size: 1.1em; font-weight: bold; cursor: pointer; }
+        .toast { position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 15px 30px; border-radius: 25px; z-index: 2000; display: none; }
+        .debug-panel { position: fixed; bottom: 100px; left: 10px; background: rgba(0,0,0,0.9); color: #0f0; padding: 10px; border-radius: 10px; font-family: monospace; font-size: 0.8em; max-width: 400px; max-height: 300px; overflow-y: auto; z-index: 1000; display: none; }
+        .debug-toggle { position: fixed; bottom: 30px; left: 30px; padding: 10px 20px; background: rgba(0,0,0,0.7); color: white; border: none; border-radius: 10px; cursor: pointer; z-index: 100; }
+        @media (max-width: 768px) {
+            .product-card { flex-direction: column; }
+            .product-image-container { width: 100%; height: 250px; }
+            .platforms { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>My Stock</h1>
+        <div id="sync-status" class="sync-status synced">✓ 同期完了</div>
+    </div>
+
+    <div class="search-bar">
+        <input type="text" id="search-input" placeholder="さがす（名前、ふりがな...）">
+        <button>🔍</button>
+    </div>
+
+    <div id="products-list" class="products-grid"></div>
+
+    <button class="add-btn" onclick="openAddModal()">+</button>
+    <button class="menu-btn" onclick="openMenu()">⋮</button>
+    <button class="debug-toggle" onclick="toggleDebug()">🐛 デバッグ</button>
+
+    <div id="debug-panel" class="debug-panel"></div>
+
+    <div id="product-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">商品を登録</h2>
+                <button class="close-btn" onclick="closeModal()">×</button>
+            </div>
+            <div class="form-group">
+                <label>商品名 *</label>
+                <input type="text" id="edit-name" placeholder="例: ぬいぐるみ">
+            </div>
+            <div class="form-group">
+                <label>ふりがな</label>
+                <input type="text" id="edit-yomi" placeholder="例: ぬいぐるみ">
+            </div>
+            <div class="form-group">
+                <label>価格</label>
+                <input type="number" id="edit-price" placeholder="0">
+            </div>
+            <div class="form-group">
+                <label>画像</label>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="file" id="edit-image-file" accept="image/*" style="flex: 1;">
+                    <span style="color: #999;">または</span>
+                    <input type="text" id="edit-image-url" placeholder="画像URL" style="flex: 1;">
+                </div>
+                <div id="image-preview" style="margin-top: 10px; max-width: 200px; max-height: 200px; display: none;">
+                    <img id="preview-img" style="width: 100%; height: auto; border-radius: 10px;" />
+                </div>
+            </div>
+            <input type="hidden" id="edit-id">
+            <button class="btn-primary" onclick="saveProduct()">保存する</button>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAq2nMRsFLG-V5HNCFVpCQPthmOX_PTt0k",
+            authDomain: "zaico-632b4.firebaseapp.com",
+            projectId: "zaico-632b4",
+            storageBucket: "zaico-632b4.firebasestorage.app",
+            messagingSenderId: "770208006576",
+            appId: "1:770208006576:web:9148896dc40e3f9b4dd675",
+            measurementId: "G-DHFY238STJ"
+        };
+
+        let app, db, unsubscribe;
+        let firebaseInitialized = false;
+
+        try {
+            debugLog('Firebase初期化開始...');
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            firebaseInitialized = true;
+            debugLog('✓ Firebase初期化成功');
+            updateSyncStatus('synced');
+        } catch (error) {
+            debugLog('✗ Firebase初期化エラー: ' + error.message);
+            updateSyncStatus('error');
+        }
+
+        window.saveProductToFirestore = async function(product) {
+            if (!firebaseInitialized) return;
+            try {
+                await setDoc(doc(db, 'inventory_products', String(product.id)), product);
+                debugLog(`Firestoreに保存成功: ${product.name}`);
+            } catch (error) {
+                debugLog(`Firestoreに保存失敗: ${error.message}`);
+            }
+        };
+
+        window.deleteProductFromFirestore = async function(id) {
+            if (!firebaseInitialized) return;
+            try {
+                await deleteDoc(doc(db, 'inventory_products', String(id)));
+                debugLog(`Firestoreから削除成功: ID=${id}`);
+            } catch (error) {
+                debugLog(`Firestoreから削除失敗: ${error.message}`);
+            }
+        };
+
+        if (firebaseInitialized) {
+            try {
+                debugLog('Firestoreリスナー登録開始');
+                unsubscribe = onSnapshot(collection(db, 'inventory_products'), (snapshot) => {
+                    debugLog(`Firestoreスナップショット受信: ${snapshot.docChanges().length}件の変更`);
+                    snapshot.docChanges().forEach((change) => {
+                        const data = change.doc.data();
+                        if (change.type === 'added' || change.type === 'modified') {
+                            const existingIndex = products.findIndex(p => p.id === data.id);
+                            if (existingIndex > -1) {
+                                products[existingIndex] = data;
+                                debugLog(`商品更新: ID=${data.id}`);
+                            } else {
+                                products.push(data);
+                                debugLog(`商品追加: ID=${data.id}`);
+                            }
+                        } else if (change.type === 'removed') {
+                            products = products.filter(p => p.id !== data.id);
+                            debugLog(`商品削除: ID=${data.id}`);
+                        }
+                    });
+                    saveData();
+                    renderProducts();
+                });
+                debugLog('✓ Firestoreリスナー登録成功');
+            } catch (error) {
+                debugLog('✗ Firestoreリスナー登録エラー: ' + error.message);
+                updateSyncStatus('error');
+            }
+        }
+
+        function updateSyncStatus(status) {
+            const statusEl = document.getElementById('sync-status');
+            statusEl.className = 'sync-status ' + status;
+            if (status === 'synced') statusEl.textContent = '✓ 同期完了';
+            else if (status === 'syncing') statusEl.textContent = '↻ 同期中';
+            else if (status === 'error') statusEl.textContent = '✗ 同期エラー';
+        }
+
+        function debugLog(message) {
+            const panel = document.getElementById('debug-panel');
+            const time = new Date().toLocaleTimeString('ja-JP');
+            panel.innerHTML += `[${time}] ${message}<br>`;
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        window.toggleDebug = function() {
+            const panel = document.getElementById('debug-panel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        };
+
+        debugLog('アプリ初期化開始');
+
+        let products = [];
+        let currentImageBase64 = '';
+
+        const platforms = [
+            { key: 'mercari', name: 'メルカリ', color: '#ff0000' },
+            { key: 'rakuma', name: 'ラクマ', color: '#ff69b4' },
+            { key: 'yahoo', name: 'Yahoo!', color: '#ff8c00' },
+            { key: 'minne', name: 'minne', color: '#ff1493' }
+        ];
+
+        function loadData() {
+            const saved = localStorage.getItem('inventoryProducts');
+            if (saved) {
+                products = JSON.parse(saved);
+                debugLog(`LocalStorageから読み込み: ${products.length}件`);
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem('inventoryProducts', JSON.stringify(products));
+            debugLog(`LocalStorageに保存: ${products.length}件`);
+        }
+
+        function renderProducts() {
+            const container = document.getElementById('products-list');
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            
+            const filtered = products.filter(p => 
+                p.name.toLowerCase().includes(searchTerm) || 
+                (p.yomi && p.yomi.toLowerCase().includes(searchTerm))
+            );
+
+            container.innerHTML = filtered.map(product => {
+                const totalStock = Object.values(product.stocks || {}).reduce((a, b) => a + b, 0);
+                const isSoldOut = totalStock === 0;
+                
+                return `
+                    <div class="product-card">
+                        <div class="product-image-container">
+                            ${product.image ? 
+                                `<img src="${product.image}" class="product-image" alt="${product.name}">` : 
+                                `<div class="product-image">NO IMAGE</div>`
+                            }
+                            ${isSoldOut ? '<div class="sold-out-badge">SOLD OUT</div>' : ''}
+                            <div class="product-price">¥${product.price.toLocaleString()}</div>
+                            <div class="product-actions">
+                                <button onclick="editProduct(${product.id})" title="商品を編集">✏️</button>
+                                <button onclick="deleteProduct(${product.id})" title="商品を削除">🗑️</button>
+                            </div>
+                        </div>
+                        <div class="product-info">
+                            <div class="product-name">${product.name}</div>
+                            <div class="product-id">ID: ${product.id}</div>
+                            <div class="platforms">
+                                ${platforms.map(platform => {
+                                    const stock = product.stocks[platform.key] || 0;
+                                    const hasStock = stock > 0;
+                                    return `
+                                        <div class="platform">
+                                            <button class="platform-btn ${hasStock ? 'has-stock' : 'no-stock'}" 
+                                                    data-action="sell" data-id="${product.id}" data-platform="${platform.key}" data-name="${platform.name}"
+                                                    style="border-color: ${platform.color}; ${hasStock ? `background: ${platform.color};` : ''}">
+                                                <div class="platform-number">${stock}</div>
+                                                <div>${hasStock ? '売れた!' : '在庫なし'}</div>
+                                                <div>${platform.name}</div>
+                                            </button>
+                                            <div class="platform-add">
+                                                <button data-action="add" data-id="${product.id}" data-platform="${platform.key}" data-name="${platform.name}">+ 在庫</button>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // イベントデリゲーションで一括処理
+            attachEventListeners();
+        }
+
+        // イベントデリゲーションによる一括処理（重複登録を防ぐ）
+        function attachEventListeners() {
+            const container = document.getElementById('products-list');
+            
+            // 既存のリスナーを削除
+            const newContainer = container.cloneNode(true);
+            container.parentNode.replaceChild(newContainer, container);
+            
+            // 新しいリスナーを登録
+            document.getElementById('products-list').addEventListener('click', function(e) {
+                const button = e.target.closest('button[data-action]');
+                if (!button) return;
+                
+                const action = button.dataset.action;
+                const id = parseInt(button.dataset.id);
+                const platform = button.dataset.platform;
+                const name = button.dataset.name;
+                
+                if (action === 'add') {
+                    addStock(id, platform, name);
+                } else if (action === 'sell') {
+                    const product = products.find(p => p.id === id);
+                    if (product && product.stocks[platform] > 0) {
+                        sellItem(id, platform, name);
+                    }
+                }
+            });
+        }
+
+        window.saveProduct = async function() {
+            const id = document.getElementById('edit-id').value;
+            const name = document.getElementById('edit-name').value.trim();
+            const yomi = document.getElementById('edit-yomi').value.trim();
+            const price = parseInt(document.getElementById('edit-price').value) || 0;
+            const fileInput = document.getElementById('edit-image-file');
+            const urlValue = document.getElementById('edit-image-url').value.trim();
+            
+            let finalImage = currentImageBase64 || urlValue;
+            
+            // ファイルが選択されている場合、Base64に変換
+            if (fileInput.files && fileInput.files[0]) {
+                try {
+                    finalImage = await fileToBase64(fileInput.files[0]);
+                } catch (error) {
+                    alert('画像の読み込みに失敗しました');
+                    return;
+                }
+            }
+
+            if (!name) {
+                alert("商品名は必須です");
+                return;
+            }
+
+            if (id) {
+                const productIndex = products.findIndex(p => p.id == id);
+                if (productIndex > -1) {
+                    products[productIndex].name = name;
+                    products[productIndex].yomi = yomi;
+                    products[productIndex].price = price;
+                    products[productIndex].image = finalImage;
+                    
+                    saveData();
+                    saveProductToFirestore(products[productIndex]);
+                    showToast('商品を更新しました');
+                    debugLog(`商品更新: ${name} (ID=${id})`);
+                }
+            } else {
+                const newId = Date.now();
+                const newProduct = {
+                    id: newId,
+                    name: name,
+                    yomi: yomi,
+                    price: price,
+                    image: finalImage,
+                    stocks: { mercari: 0, rakuma: 0, minne: 0, yahoo: 0 }
+                };
+                
+                products.unshift(newProduct);
+                saveData();
+                saveProductToFirestore(newProduct);
+                showToast('新商品を登録しました');
+                debugLog(`商品登録: ${name} (ID=${newId})`);
+            }
+
+            closeModal();
+            renderProducts();
+        };
+
+        window.deleteProduct = function(id) {
+            if (!confirm("この商品を削除しますか？\n（この操作は元に戻せません）")) {
+                return;
+            }
+            
+            products = products.filter(p => p.id !== id);
+            saveData();
+            deleteProductFromFirestore(id);
+            renderProducts();
+            showToast("商品を削除しました");
+            debugLog(`商品削除: ID=${id}`);
+        };
+
+        function addStock(id, platformKey, platformName) {
+            const product = products.find(p => p.id === id);
+            if (product) {
+                product.stocks[platformKey]++;
+                saveData();
+                saveProductToFirestore(product);
+                renderProducts();
+                showToast(`${platformName}に入庫しました`);
+                debugLog(`在庫追加: ${product.name} - ${platformName} (新在庫数: ${product.stocks[platformKey]})`);
+            }
+        }
+
+        function sellItem(id, platformKey, platformName) {
+            const product = products.find(p => p.id === id);
+            if (product && product.stocks[platformKey] > 0) {
+                product.stocks[platformKey]--;
+                saveData();
+                saveProductToFirestore(product);
+                renderProducts();
+                showToast(`${platformName}で販売しました`);
+                debugLog(`販売: ${product.name} - ${platformName}`);
+            }
+        }
+
+        window.openAddModal = function() {
+            document.getElementById('modal-title').innerText = '商品を登録';
+            document.getElementById('edit-id').value = '';
+            document.getElementById('edit-name').value = '';
+            document.getElementById('edit-yomi').value = '';
+            document.getElementById('edit-price').value = '';
+            document.getElementById('edit-image-url').value = '';
+            document.getElementById('edit-image-file').value = '';
+            document.getElementById('image-preview').style.display = 'none';
+            currentImageBase64 = '';
+            document.getElementById('product-modal').style.display = 'block';
+        };
+
+        window.editProduct = function(id) {
+            const product = products.find(p => p.id === id);
+            if (product) {
+                document.getElementById('modal-title').innerText = '商品を編集';
+                document.getElementById('edit-id').value = product.id;
+                document.getElementById('edit-name').value = product.name;
+                document.getElementById('edit-yomi').value = product.yomi || '';
+                document.getElementById('edit-price').value = product.price;
+                document.getElementById('edit-image-url').value = product.image || '';
+                document.getElementById('edit-image-file').value = '';
+                document.getElementById('image-preview').style.display = 'none';
+                currentImageBase64 = '';
+                document.getElementById('product-modal').style.display = 'block';
+            }
+        };
+
+        window.closeModal = function() {
+            document.getElementById('product-modal').style.display = 'none';
+        };
+
+        window.openMenu = function() {
+            alert('メニュー機能は開発中です');
+        };
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.style.display = 'block';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+        }
+
+        // ファイルをBase64に変換する関数
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // 画像ファイル選択時のプレビュー
+        document.getElementById('edit-image-file').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                try {
+                    const base64 = await fileToBase64(file);
+                    document.getElementById('preview-img').src = base64;
+                    document.getElementById('image-preview').style.display = 'block';
+                    currentImageBase64 = base64;
+                    debugLog(`画像ファイル選択: ${file.name}`);
+                } catch (error) {
+                    alert('画像の読み込みに失敗しました');
+                    debugLog(`画像読み込みエラー: ${error.message}`);
+                }
+            }
+        });
+
+        document.getElementById('search-input').addEventListener('input', renderProducts);
+
+        loadData();
+        renderProducts();
+
+        if (firebaseInitialized) {
+            debugLog('Firebase接続あり - 同期開始');
+        } else {
+            debugLog('Firebase接続なし - ローカルモード');
+        }
+    </script>
+</body>
+</html>
